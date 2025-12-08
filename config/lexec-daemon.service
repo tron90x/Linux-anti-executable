@@ -1,0 +1,25 @@
+[Unit]
+Description=Linux Anti-Executable Daemon
+Documentation=https://github.com/tron90x/Linux-anti-executable
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/lexec-daemon --foreground
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=false
+ReadWritePaths=/var/lib/lexec /var/run/lexec
+
+# Required capabilities
+AmbientCapabilities=CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target
