@@ -1,10 +1,13 @@
 /*
  * Linux Anti-Executable - Fanotify Handler Implementation
  *
- * Uses fanotify to intercept execution attempts.
+ * Uses fanotify to intercept execution attempts AND shared library loading.
  * Key flags:
  *   - FAN_OPEN_EXEC_PERM: Permission event for execve()
  *   - FAN_OPEN_PERM: Permission event for open() (catches .so loading)
+ *
+ * For .so files: We use FAN_OPEN_PERM and filter by file extension/ELF type
+ * to avoid checking every file open on the system.
  */
 
 #define _GNU_SOURCE
@@ -26,6 +29,9 @@
 
 /* Global flag for graceful shutdown */
 static volatile sig_atomic_t g_running = 1;
+
+/* Configuration: whether to monitor .so files */
+static int g_monitor_shared_libs = 1;
 
 /* Forward declarations */
 static int get_path_from_fd(int fd, char *path, size_t path_size);
@@ -60,30 +66,43 @@ int fanotify_init_exec_monitor(void) {
 
 int fanotify_add_mount(int fan_fd, const char *mount_path) {
     int ret;
+    uint64_t mask;
 
     /*
      * Mark the filesystem for monitoring:
      * - FAN_MARK_ADD: Add to mark
      * - FAN_MARK_MOUNT: Monitor entire mount point
-     * - FAN_OPEN_EXEC_PERM: Permission events for execution
-     *
-     * Note: FAN_OPEN_EXEC_PERM requires kernel 5.0+
+     * - FAN_OPEN_EXEC_PERM: Permission events for execution (kernel 5.0+)
+     * - FAN_OPEN_PERM: Permission events for file opens (catches .so loading)
      */
+    mask = FAN_OPEN_EXEC_PERM;  /* Always monitor execve() */
+
+    if (g_monitor_shared_libs) {
+        mask |= FAN_OPEN_PERM;  /* Also monitor open() for .so files */
+    }
+
     ret = fanotify_mark(
         fan_fd,
         FAN_MARK_ADD | FAN_MARK_MOUNT,
-        FAN_OPEN_EXEC_PERM,  /* This catches execve() calls */
+        mask,
         AT_FDCWD,
         mount_path
     );
 
     if (ret == -1) {
-        perror("fanotify_mark (EXEC_PERM)");
+        perror("fanotify_mark");
         return -1;
     }
 
     printf("Monitoring executions on: %s\n", mount_path);
+    if (g_monitor_shared_libs) {
+        printf("Monitoring shared library loading on: %s\n", mount_path);
+    }
     return 0;
+}
+
+void fanotify_set_monitor_shared_libs(int enabled) {
+    g_monitor_shared_libs = enabled;
 }
 
 int fanotify_allow(int fan_fd, int event_fd) {
@@ -161,10 +180,67 @@ static int is_shared_library(const char *path) {
     return 0;
 }
 
-static void handle_permission_event(int fan_fd, struct fanotify_event_metadata *event) {
+/*
+ * Handle FAN_OPEN_PERM events (for .so file loading)
+ * We filter here to only check .so files, allowing everything else
+ */
+static void handle_open_perm_event(int fan_fd, struct fanotify_event_metadata *event) {
     char path[PATH_MAX];
     char hash[SHA256_HEX_LENGTH + 1];
-    int allow = 0;
+
+    /* Get the file path */
+    if (get_path_from_fd(event->fd, path, sizeof(path)) == -1) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* IMPORTANT: Only check .so files to avoid performance impact */
+    if (!is_shared_library(path)) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* Verify it's actually an ELF file */
+    if (!is_elf_file(event->fd)) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* Calculate file hash */
+    if (hash_fd(event->fd, hash) == -1) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* Check whitelist */
+    if (whitelist_check(hash)) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* Unknown shared library */
+    printf("[BLOCKED] New shared library detected:\n");
+    printf("  Path: %s\n", path);
+    printf("  Hash: %s\n", hash);
+    printf("  PID:  %d (loading process)\n", event->pid);
+
+    if (whitelist_get_learning_mode()) {
+        printf("  Action: AUTO-ALLOW (learning mode)\n");
+        whitelist_add(hash, path, 0);
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    printf("  Action: DENIED (not in whitelist)\n");
+    fanotify_deny(fan_fd, event->fd);
+}
+
+/*
+ * Handle FAN_OPEN_EXEC_PERM events (for direct execution via execve)
+ */
+static void handle_exec_perm_event(int fan_fd, struct fanotify_event_metadata *event) {
+    char path[PATH_MAX];
+    char hash[SHA256_HEX_LENGTH + 1];
 
     /* Get the file path */
     if (get_path_from_fd(event->fd, path, sizeof(path)) == -1) {
@@ -230,6 +306,8 @@ void fanotify_event_loop(int fan_fd) {
     struct fanotify_event_metadata *event;
 
     printf("Starting fanotify event loop...\n");
+    printf("Monitoring: executables (execve)%s\n",
+           g_monitor_shared_libs ? " + shared libraries (.so)" : "");
 
     while (g_running) {
         len = read(fan_fd, buf, sizeof(buf));
@@ -256,9 +334,13 @@ void fanotify_event_loop(int fan_fd) {
                 break;
             }
 
-            /* Handle permission event */
+            /* Handle execution permission event (execve) */
             if (event->mask & FAN_OPEN_EXEC_PERM) {
-                handle_permission_event(fan_fd, event);
+                handle_exec_perm_event(fan_fd, event);
+            }
+            /* Handle open permission event (catches .so loading) */
+            else if (event->mask & FAN_OPEN_PERM) {
+                handle_open_perm_event(fan_fd, event);
             }
 
             /* Close the file descriptor */

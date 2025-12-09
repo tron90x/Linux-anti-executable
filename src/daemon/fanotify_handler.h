@@ -35,4 +35,16 @@ int fanotify_allow(int fan_fd, int event_fd);
  */
 int fanotify_deny(int fan_fd, int event_fd);
 
+/*
+ * Enable/disable shared library (.so) monitoring
+ * Must be called before fanotify_add_mount()
+ * Default: enabled
+ */
+void fanotify_set_monitor_shared_libs(int enabled);
+
+/*
+ * Stop the event loop gracefully
+ */
+void fanotify_stop(void);
+
 #endif /* LEXEC_FANOTIFY_H */

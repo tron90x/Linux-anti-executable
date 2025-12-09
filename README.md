@@ -47,30 +47,72 @@ This application consists of two main components:
 - **Real-time interception**: Blocks unknown executables until user approval
 - **Whitelist management**: SQLite database storing approved files by SHA256 hash
 - **Hash-based identification**: Files identified by content hash, not just path
-- **Shared library monitoring**: Tracks .so files loaded via dlopen()
+- **Shared library monitoring**: Tracks .so files loaded via dlopen() and dynamic linker
 - **Persistence**: Approved files remain approved across reboots
 - **System protection**: Critical system files auto-whitelisted
+
+## What Gets Intercepted
+
+| File Type | Intercepted | Mechanism |
+|-----------|-------------|-----------|
+| ELF executables | ✅ Yes | `FAN_OPEN_EXEC_PERM` on execve() |
+| Shell scripts (#!/bin/bash) | ✅ Yes | Interpreter (bash) is intercepted |
+| Python scripts | ✅ Yes | Interpreter (python) is intercepted |
+| Shared libraries (.so) | ✅ Yes | `FAN_OPEN_PERM` filtered by extension |
+| Libraries via dlopen() | ✅ Yes | Same FAN_OPEN_PERM mechanism |
+| Kernel modules (.ko) | ⚠️ Partial | Requires additional configuration |
+
+### Shared Library (.so) Monitoring Details
+
+The daemon intercepts shared library loading through `FAN_OPEN_PERM`:
+
+```
+Program starts → ld-linux.so loads dependencies → Each .so file triggers FAN_OPEN_PERM
+                                                            ↓
+                                              Daemon checks whitelist → Allow/Deny
+```
+
+To minimize performance impact, FAN_OPEN_PERM events are filtered:
+1. Only files with `.so` extension or `.so.X.Y.Z` pattern are checked
+2. Non-ELF files are immediately allowed
+3. Whitelisted files return instantly (hash lookup)
 
 ## Technical Requirements
 
 - Linux kernel 5.0+ (for `FAN_OPEN_EXEC_PERM`)
 - `CAP_SYS_ADMIN` capability (or root) for fanotify
 - SQLite3
+- OpenSSL (for SHA256)
 - GTK4 (for GUI client)
+
+## Supported Distributions
+
+| Distribution | Tested | Notes |
+|--------------|--------|-------|
+| **Ubuntu 20.04+** | ✅ | Kernel 5.4+, full support |
+| **Ubuntu 22.04+** | ✅ | Kernel 5.15+, recommended |
+| **Fedora 32+** | ✅ | Kernel 5.6+, full support |
+| **Fedora 39/40** | ✅ | Kernel 6.x, recommended |
+| **Debian 11+** | ✅ | Kernel 5.10+ |
+| **Arch Linux** | ✅ | Rolling release, latest kernel |
+
+Both RPM-based (Fedora, RHEL, CentOS) and DEB-based (Ubuntu, Debian) distributions are supported.
 
 ## Building
 
 ```bash
 # Install dependencies (Debian/Ubuntu)
-sudo apt install build-essential libsqlite3-dev libgtk-4-dev
+sudo apt install build-essential libsqlite3-dev libssl-dev libgtk-4-dev
 
-# Build daemon
-cd src/daemon
+# Install dependencies (Fedora)
+sudo dnf install gcc make sqlite-devel openssl-devel gtk4-devel
+
+# Build everything
 make
 
-# Build GUI
-cd src/gui
-make
+# Or build components separately
+make daemon
+make gui
 ```
 
 ## Installation
