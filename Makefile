@@ -37,9 +37,11 @@ install: all
 	install -d $(DESTDIR)/usr/share/icons/hicolor/scalable/apps
 	install -m 644 assets/lexec.svg $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/
 
-	# Install autostart entry
-	install -d $(DESTDIR)/etc/xdg/autostart
-	install -m 644 config/lexec-gui-autostart.desktop $(DESTDIR)/etc/xdg/autostart/
+	# NOTE: Autostart disabled by default - user should start manually
+	# To enable autostart, uncomment the following lines or run:
+	#   sudo cp config/lexec-gui-autostart.desktop /etc/xdg/autostart/
+	# install -d $(DESTDIR)/etc/xdg/autostart
+	# install -m 644 config/lexec-gui-autostart.desktop $(DESTDIR)/etc/xdg/autostart/
 
 	# Install scripts
 	install -d $(DESTDIR)$(PREFIX)/share/lexec
@@ -50,17 +52,22 @@ install: all
 	install -d $(DESTDIR)/var/run/lexec
 
 	@echo ""
-	@echo "Installation complete!"
+	@echo "=============================================="
+	@echo "  Installation complete!"
+	@echo "=============================================="
 	@echo ""
 	@echo "First-time setup:"
-	@echo "  sudo $(PREFIX)/share/lexec/first-run-scan.sh"
+	@echo "  1. Scan existing executables (as root):"
+	@echo "     sudo lexec-daemon --scan --learn --foreground"
 	@echo ""
-	@echo "Or manually:"
-	@echo "  sudo lexec-daemon --scan --foreground"
-	@echo "  sudo systemctl enable --now lexec-daemon"
+	@echo "  2. Enable the daemon service:"
+	@echo "     sudo systemctl enable --now lexec-daemon"
 	@echo ""
-	@echo "The GUI will auto-start on next login."
-	@echo "You can also find 'Linux Anti-Executable' in your applications menu."
+	@echo "  3. Start the GUI from your applications menu:"
+	@echo "     Look for 'Linux Anti-Executable' icon"
+	@echo "     Or run: lexec-gui"
+	@echo ""
+	@echo "NOTE: The GUI does NOT auto-start. Launch it manually when needed."
 
 uninstall:
 	$(MAKE) -C src/daemon uninstall PREFIX=$(PREFIX)

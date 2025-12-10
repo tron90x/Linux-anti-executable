@@ -134,7 +134,7 @@ sudo lexec-daemon --scan --learn --foreground
 # 4. Enable service
 sudo systemctl enable --now lexec-daemon
 
-# 5. GUI starts automatically on login, or run manually:
+# 5. Start GUI manually from applications menu or terminal:
 lexec-gui
 ```
 
@@ -158,7 +158,7 @@ sudo lexec-daemon --scan --learn --foreground
 # 5. Enable service
 sudo systemctl enable --now lexec-daemon
 
-# 6. GUI starts automatically on login, or run manually:
+# 6. Start GUI manually from applications menu or terminal:
 lexec-gui
 ```
 
@@ -184,7 +184,7 @@ sudo systemctl enable --now lexec-daemon
 | fanotify | ✅ | ✅ | Kernel feature, works on both |
 | GTK4 | ✅ | ✅ | Same API on both |
 | systemd | ✅ | ✅ | Same unit file works |
-| XDG autostart | ✅ | ✅ | Standard desktop feature |
+| Desktop icon | ✅ | ✅ | Appears in applications menu |
 | SELinux | N/A | ⚠️ | May need policy on Fedora |
 | AppArmor | ⚠️ | N/A | Usually not an issue |
 
