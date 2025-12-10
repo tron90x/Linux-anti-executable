@@ -13,6 +13,8 @@
 #define _GNU_SOURCE
 #include "fanotify_handler.h"
 #include "whitelist.h"
+#include "whitelist_cache.h"
+#include "ipc_server.h"
 #include "../common/hash.h"
 #include "../common/protocol.h"
 
@@ -23,9 +25,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <syslog.h>
 #include <sys/fanotify.h>
 #include <sys/stat.h>
 #include <linux/limits.h>
+
+/* External functions from main.c */
+extern int daemon_is_path_excluded(const char *path);
+extern int daemon_get_gui_timeout(void);
+extern int daemon_get_default_deny(void);
+extern int daemon_is_learning_mode(void);
 
 /* Global flag for graceful shutdown */
 static volatile sig_atomic_t g_running = 1;
@@ -33,11 +42,17 @@ static volatile sig_atomic_t g_running = 1;
 /* Configuration: whether to monitor .so files */
 static int g_monitor_shared_libs = 1;
 
+/* Statistics */
+static uint64_t g_stat_allowed = 0;
+static uint64_t g_stat_denied = 0;
+static uint64_t g_stat_cached = 0;
+
 /* Forward declarations */
 static int get_path_from_fd(int fd, char *path, size_t path_size);
 static int is_elf_file(int fd);
 static int is_shared_library(const char *path);
-static void handle_permission_event(int fan_fd, struct fanotify_event_metadata *event);
+static int get_parent_path(pid_t pid, char *path, size_t path_size);
+static int ask_user_permission(const char *path, const char *hash, pid_t pid, int is_so);
 
 int fanotify_init_exec_monitor(void) {
     int fan_fd;
@@ -115,6 +130,7 @@ int fanotify_allow(int fan_fd, int event_fd) {
         perror("fanotify allow response");
         return -1;
     }
+    g_stat_allowed++;
     return 0;
 }
 
@@ -128,6 +144,7 @@ int fanotify_deny(int fan_fd, int event_fd) {
         perror("fanotify deny response");
         return -1;
     }
+    g_stat_denied++;
     return 0;
 }
 
@@ -139,6 +156,22 @@ static int get_path_from_fd(int fd, char *path, size_t path_size) {
     len = readlink(proc_path, path, path_size - 1);
 
     if (len == -1) {
+        return -1;
+    }
+
+    path[len] = '\0';
+    return 0;
+}
+
+static int get_parent_path(pid_t pid, char *path, size_t path_size) {
+    char proc_path[64];
+    ssize_t len;
+
+    snprintf(proc_path, sizeof(proc_path), "/proc/%d/exe", pid);
+    len = readlink(proc_path, path, path_size - 1);
+
+    if (len == -1) {
+        path[0] = '\0';
         return -1;
     }
 
@@ -181,6 +214,54 @@ static int is_shared_library(const char *path) {
 }
 
 /*
+ * Ask user for permission via IPC to GUI
+ * Returns: 1 = allow and whitelist, 0 = allow once, -1 = deny
+ */
+static int ask_user_permission(const char *path, const char *hash, pid_t pid, int is_so) {
+    lexec_exec_request_t request;
+    lexec_ipc_response_t response;
+    int timeout_ms = daemon_get_gui_timeout();
+
+    /* Build request */
+    memset(&request, 0, sizeof(request));
+    strncpy(request.path, path, sizeof(request.path) - 1);
+    strncpy(request.hash, hash, sizeof(request.hash) - 1);
+    request.pid = pid;
+    request.is_shared_lib = is_so ? 1 : 0;
+    get_parent_path(pid, request.parent_path, sizeof(request.parent_path));
+
+    /* Send to GUI and wait */
+    response = ipc_request_permission(&request, timeout_ms);
+
+    switch (response) {
+        case LEXEC_RESPONSE_ALLOW_ALWAYS:
+            syslog(LOG_INFO, "User ALLOWED (always): %s", path);
+            return 1;  /* Allow and whitelist */
+
+        case LEXEC_RESPONSE_ALLOW_ONCE:
+            syslog(LOG_INFO, "User ALLOWED (once): %s", path);
+            return 0;  /* Allow but don't whitelist */
+
+        case LEXEC_RESPONSE_DENY:
+            syslog(LOG_WARNING, "User DENIED: %s", path);
+            return -1;
+
+        case LEXEC_RESPONSE_TIMEOUT:
+            syslog(LOG_WARNING, "GUI timeout for: %s (default: %s)",
+                   path, daemon_get_default_deny() ? "DENY" : "ALLOW");
+            return daemon_get_default_deny() ? -1 : 0;
+
+        case LEXEC_RESPONSE_NO_CLIENT:
+            syslog(LOG_WARNING, "No GUI connected for: %s (default: %s)",
+                   path, daemon_get_default_deny() ? "DENY" : "ALLOW");
+            return daemon_get_default_deny() ? -1 : 0;
+
+        default:
+            return daemon_get_default_deny() ? -1 : 0;
+    }
+}
+
+/*
  * Handle FAN_OPEN_PERM events (for .so file loading)
  * We filter here to only check .so files, allowing everything else
  */
@@ -190,6 +271,12 @@ static void handle_open_perm_event(int fan_fd, struct fanotify_event_metadata *e
 
     /* Get the file path */
     if (get_path_from_fd(event->fd, path, sizeof(path)) == -1) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
+    /* Check if path is excluded */
+    if (daemon_is_path_excluded(path)) {
         fanotify_allow(fan_fd, event->fd);
         return;
     }
@@ -212,27 +299,44 @@ static void handle_open_perm_event(int fan_fd, struct fanotify_event_metadata *e
         return;
     }
 
-    /* Check whitelist */
-    if (whitelist_check(hash)) {
+    /* Check in-memory cache first (fastest) */
+    if (cache_check(hash)) {
+        g_stat_cached++;
         fanotify_allow(fan_fd, event->fd);
         return;
     }
 
-    /* Unknown shared library */
-    printf("[BLOCKED] New shared library detected:\n");
-    printf("  Path: %s\n", path);
-    printf("  Hash: %s\n", hash);
-    printf("  PID:  %d (loading process)\n", event->pid);
+    /* Check database whitelist */
+    if (whitelist_check(hash)) {
+        cache_add(hash, path, 0);  /* Add to cache */
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
 
-    if (whitelist_get_learning_mode()) {
+    /* Unknown shared library - handle according to mode */
+    printf("[NEW] Shared library: %s\n", path);
+
+    if (daemon_is_learning_mode()) {
         printf("  Action: AUTO-ALLOW (learning mode)\n");
         whitelist_add(hash, path, 0);
+        cache_add(hash, path, 0);
         fanotify_allow(fan_fd, event->fd);
         return;
     }
 
-    printf("  Action: DENIED (not in whitelist)\n");
-    fanotify_deny(fan_fd, event->fd);
+    /* Ask user via GUI */
+    int decision = ask_user_permission(path, hash, event->pid, 1);
+
+    if (decision >= 0) {
+        if (decision == 1) {
+            /* Add to whitelist */
+            whitelist_add(hash, path, 0);
+            cache_add(hash, path, 0);
+        }
+        fanotify_allow(fan_fd, event->fd);
+    } else {
+        fanotify_deny(fan_fd, event->fd);
+    }
 }
 
 /*
@@ -249,6 +353,12 @@ static void handle_exec_perm_event(int fan_fd, struct fanotify_event_metadata *e
         return;
     }
 
+    /* Check if path is excluded */
+    if (daemon_is_path_excluded(path)) {
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
+
     /* Skip non-ELF files (scripts handled by interpreter) */
     if (!is_elf_file(event->fd)) {
         fanotify_allow(fan_fd, event->fd);
@@ -262,42 +372,48 @@ static void handle_exec_perm_event(int fan_fd, struct fanotify_event_metadata *e
         return;
     }
 
-    /* Check whitelist */
-    if (whitelist_check(hash)) {
-        /* File is whitelisted */
-        printf("[ALLOW] %s (whitelisted)\n", path);
+    /* Check in-memory cache first (fastest) */
+    if (cache_check(hash)) {
+        g_stat_cached++;
         fanotify_allow(fan_fd, event->fd);
         return;
     }
 
-    /*
-     * File is NOT whitelisted - this is where we would:
-     * 1. Send request to GUI via IPC
-     * 2. Wait for user response
-     * 3. Allow or deny based on response
-     *
-     * For this PoC, we'll use a simple console prompt or
-     * learning mode (allow and add to whitelist)
-     */
-    printf("[BLOCKED] New executable detected:\n");
-    printf("  Path: %s\n", path);
-    printf("  Hash: %s\n", hash);
-    printf("  PID:  %d\n", event->pid);
+    /* Check database whitelist */
+    if (whitelist_check(hash)) {
+        cache_add(hash, path, 0);  /* Add to cache for next time */
+        fanotify_allow(fan_fd, event->fd);
+        return;
+    }
 
-    /* Check if in learning mode */
-    if (whitelist_get_learning_mode()) {
+    /* Unknown executable */
+    printf("[NEW] Executable: %s\n", path);
+
+    if (daemon_is_learning_mode()) {
         printf("  Action: AUTO-ALLOW (learning mode)\n");
         whitelist_add(hash, path, 0);
+        cache_add(hash, path, 0);
         fanotify_allow(fan_fd, event->fd);
         return;
     }
 
-    /*
-     * In production, we would send to GUI here.
-     * For now, deny unknown executables.
-     */
-    printf("  Action: DENIED (not in whitelist)\n");
-    fanotify_deny(fan_fd, event->fd);
+    /* Ask user via GUI */
+    int decision = ask_user_permission(path, hash, event->pid, 0);
+
+    if (decision >= 0) {
+        if (decision == 1) {
+            /* Add to whitelist */
+            whitelist_add(hash, path, 0);
+            cache_add(hash, path, 0);
+            printf("  Action: ALLOWED (added to whitelist)\n");
+        } else {
+            printf("  Action: ALLOWED (once)\n");
+        }
+        fanotify_allow(fan_fd, event->fd);
+    } else {
+        printf("  Action: DENIED\n");
+        fanotify_deny(fan_fd, event->fd);
+    }
 }
 
 void fanotify_event_loop(int fan_fd) {
@@ -353,8 +469,16 @@ void fanotify_event_loop(int fan_fd) {
     }
 
     printf("Fanotify event loop stopped\n");
+    printf("Statistics: allowed=%lu denied=%lu cached=%lu\n",
+           g_stat_allowed, g_stat_denied, g_stat_cached);
 }
 
 void fanotify_stop(void) {
     g_running = 0;
+}
+
+void fanotify_get_stats(uint64_t *allowed, uint64_t *denied, uint64_t *cached) {
+    if (allowed) *allowed = g_stat_allowed;
+    if (denied) *denied = g_stat_denied;
+    if (cached) *cached = g_stat_cached;
 }
