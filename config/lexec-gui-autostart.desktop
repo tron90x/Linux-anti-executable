@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Linux Anti-Executable Monitor
+Comment=Security monitor for executable whitelist
+Exec=/usr/local/bin/lexec-gui --minimized
+Icon=lexec
+Terminal=false
+Categories=System;Security;
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
+Hidden=false
+NoDisplay=false
+StartupNotify=false

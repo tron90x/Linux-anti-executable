@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Linux Anti-Executable
+Comment=Monitors and controls which programs can run on your system
+Exec=/usr/local/bin/lexec-gui
+Icon=lexec
+Terminal=false
+Categories=System;Security;
+Keywords=security;whitelist;executable;protection;
+StartupNotify=true

@@ -2,10 +2,10 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -O2 -g -D_GNU_SOURCE
-LDFLAGS = -lsqlite3 -lssl -lcrypto
+LDFLAGS = -lsqlite3 -lssl -lcrypto -lpthread
 
 TARGET = lexec-daemon
-SRCS = main.c fanotify_handler.c whitelist.c ../common/hash.c
+SRCS = main.c fanotify_handler.c whitelist.c whitelist_cache.c ipc_server.c ../common/hash.c
 OBJS = $(SRCS:.c=.o)
 
 PREFIX ?= /usr/local

@@ -31,6 +31,16 @@ install: all
 	install -d $(DESTDIR)/etc/systemd/system
 	install -m 644 config/lexec-daemon.service $(DESTDIR)/etc/systemd/system/
 
+	# Install desktop file and icon
+	install -d $(DESTDIR)/usr/share/applications
+	install -m 644 config/lexec-gui.desktop $(DESTDIR)/usr/share/applications/
+	install -d $(DESTDIR)/usr/share/icons/hicolor/scalable/apps
+	install -m 644 assets/lexec.svg $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/
+
+	# Install autostart entry
+	install -d $(DESTDIR)/etc/xdg/autostart
+	install -m 644 config/lexec-gui-autostart.desktop $(DESTDIR)/etc/xdg/autostart/
+
 	# Install scripts
 	install -d $(DESTDIR)$(PREFIX)/share/lexec
 	install -m 755 scripts/first-run-scan.sh $(DESTDIR)$(PREFIX)/share/lexec/
@@ -48,6 +58,9 @@ install: all
 	@echo "Or manually:"
 	@echo "  sudo lexec-daemon --scan --foreground"
 	@echo "  sudo systemctl enable --now lexec-daemon"
+	@echo ""
+	@echo "The GUI will auto-start on next login."
+	@echo "You can also find 'Linux Anti-Executable' in your applications menu."
 
 uninstall:
 	$(MAKE) -C src/daemon uninstall PREFIX=$(PREFIX)

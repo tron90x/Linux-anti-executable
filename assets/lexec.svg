@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2d5aa0" stroke="#1a3d6e" stroke-width="4"/>
+
+  <!-- Shield shape -->
+  <path d="M64 20 L100 35 L100 65 C100 90 64 110 64 110 C64 110 28 90 28 65 L28 35 Z"
+        fill="#3d7dd4" stroke="#1a3d6e" stroke-width="2"/>
+
+  <!-- Inner shield highlight -->
+  <path d="M64 28 L92 40 L92 62 C92 82 64 100 64 100 C64 100 36 82 36 62 L36 40 Z"
+        fill="#5a9cf0" opacity="0.3"/>
+
+  <!-- Lock icon in center -->
+  <rect x="50" y="55" width="28" height="24" rx="3" fill="#ffffff" stroke="#1a3d6e" stroke-width="2"/>
+
+  <!-- Lock shackle -->
+  <path d="M54 55 L54 45 C54 38 74 38 74 45 L74 55"
+        fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M54 55 L54 45 C54 38 74 38 74 45 L74 55"
+        fill="none" stroke="#1a3d6e" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Keyhole -->
+  <circle cx="64" cy="65" r="4" fill="#1a3d6e"/>
+  <rect x="62" y="65" width="4" height="8" fill="#1a3d6e"/>
+
+  <!-- Check mark (for allowed status) -->
+  <path d="M45 90 L55 100 L80 75"
+        fill="none" stroke="#4ade80" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
