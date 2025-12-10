@@ -98,30 +98,97 @@ To minimize performance impact, FAN_OPEN_PERM events are filtered:
 
 Both RPM-based (Fedora, RHEL, CentOS) and DEB-based (Ubuntu, Debian) distributions are supported.
 
-## Building
+## Quick Start
 
 ```bash
-# Install dependencies (Debian/Ubuntu)
-sudo apt install build-essential libsqlite3-dev libssl-dev libgtk-4-dev
+# Automatic dependency installation (detects your distro)
+./scripts/install-deps.sh
 
-# Install dependencies (Fedora)
-sudo dnf install gcc make sqlite-devel openssl-devel gtk4-devel
-
-# Build everything
+# Build
 make
 
-# Or build components separately
-make daemon
-make gui
+# Install
+sudo make install
+
+# First run - scan your system
+sudo lexec-daemon --scan --learn --foreground
 ```
 
-## Installation
+## Installation by Distribution
+
+### Ubuntu / Debian / Linux Mint
 
 ```bash
+# 1. Install dependencies
+sudo apt update
+sudo apt install build-essential libsqlite3-dev libssl-dev libgtk-4-dev pkg-config
+
+# 2. Build and install
+make
 sudo make install
-sudo systemctl enable lexec-daemon
-sudo systemctl start lexec-daemon
+
+# 3. Initial setup (whitelist existing executables)
+sudo lexec-daemon --scan --learn --foreground
+# Press Ctrl+C after scan completes
+
+# 4. Enable service
+sudo systemctl enable --now lexec-daemon
+
+# 5. GUI starts automatically on login, or run manually:
+lexec-gui
 ```
+
+### Fedora / RHEL / CentOS
+
+```bash
+# 1. Install dependencies
+sudo dnf install gcc make sqlite-devel openssl-devel gtk4-devel pkg-config
+
+# 2. Build and install
+make
+sudo make install
+
+# 3. SELinux policy (Fedora uses SELinux by default)
+./scripts/install-selinux.sh
+
+# 4. Initial setup
+sudo lexec-daemon --scan --learn --foreground
+# Press Ctrl+C after scan completes
+
+# 5. Enable service
+sudo systemctl enable --now lexec-daemon
+
+# 6. GUI starts automatically on login, or run manually:
+lexec-gui
+```
+
+### Arch Linux / Manjaro
+
+```bash
+# 1. Install dependencies
+sudo pacman -S base-devel sqlite openssl gtk4 pkgconf
+
+# 2. Build and install
+make
+sudo make install
+
+# 3. Initial setup and enable
+sudo lexec-daemon --scan --learn --foreground
+sudo systemctl enable --now lexec-daemon
+```
+
+## Distribution Compatibility
+
+| Feature | Ubuntu | Fedora | Notes |
+|---------|--------|--------|-------|
+| fanotify | ✅ | ✅ | Kernel feature, works on both |
+| GTK4 | ✅ | ✅ | Same API on both |
+| systemd | ✅ | ✅ | Same unit file works |
+| XDG autostart | ✅ | ✅ | Standard desktop feature |
+| SELinux | N/A | ⚠️ | May need policy on Fedora |
+| AppArmor | ⚠️ | N/A | Usually not an issue |
+
+**The same binary works on both distributions** - no recompilation needed.
 
 ## Project Structure
 
