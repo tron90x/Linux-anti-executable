@@ -15,6 +15,7 @@
 #define LEXEC_WHITELIST_CACHE_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /*
  * Initialize the in-memory cache

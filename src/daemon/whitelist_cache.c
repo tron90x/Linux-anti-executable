@@ -5,7 +5,6 @@
  * of definitely-not-whitelisted executables.
  */
 
-#define _GNU_SOURCE
 #include "whitelist_cache.h"
 #include "whitelist.h"
 

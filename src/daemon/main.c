@@ -18,7 +18,6 @@
  *   --config PATH  Path to configuration file
  */
 
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +26,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <syslog.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <linux/limits.h>
@@ -92,24 +92,24 @@ static const char *MONITOR_MOUNTS[] = {
     NULL
 };
 
-/* Logging macros */
-#define LOG_INFO(fmt, ...) do { \
+/* Logging macros - use LEXEC_ prefix to avoid conflict with syslog.h */
+#define LEXEC_LOG_INFO(fmt, ...) do { \
     if (g_config.log_to_syslog) syslog(LOG_INFO, fmt, ##__VA_ARGS__); \
     if (g_config.foreground) printf("[INFO] " fmt "\n", ##__VA_ARGS__); \
 } while(0)
 
-#define LOG_WARN(fmt, ...) do { \
+#define LEXEC_LOG_WARN(fmt, ...) do { \
     if (g_config.log_to_syslog) syslog(LOG_WARNING, fmt, ##__VA_ARGS__); \
     if (g_config.foreground) printf("[WARN] " fmt "\n", ##__VA_ARGS__); \
 } while(0)
 
-#define LOG_ERR(fmt, ...) do { \
+#define LEXEC_LOG_ERR(fmt, ...) do { \
     if (g_config.log_to_syslog) syslog(LOG_ERR, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[ERROR] " fmt "\n", ##__VA_ARGS__); \
 } while(0)
 
 static void signal_handler(int sig) {
-    LOG_INFO("Received signal %d, shutting down...", sig);
+    LEXEC_LOG_INFO("Received signal %d, shutting down...", sig);
     g_running = 0;
     fanotify_stop();
 }
@@ -135,13 +135,13 @@ static int create_directories(void) {
 
     /* Create /var/lib/lexec */
     if (mkdir("/var/lib/lexec", 0750) == -1 && errno != EEXIST) {
-        LOG_ERR("mkdir /var/lib/lexec: %s", strerror(errno));
+        LEXEC_LOG_ERR("mkdir /var/lib/lexec: %s", strerror(errno));
         return -1;
     }
 
     /* Create /var/run/lexec for socket with group read access */
     if (mkdir("/var/run/lexec", 0755) == -1 && errno != EEXIST) {
-        LOG_ERR("mkdir /var/run/lexec: %s", strerror(errno));
+        LEXEC_LOG_ERR("mkdir /var/run/lexec: %s", strerror(errno));
         return -1;
     }
 
@@ -198,14 +198,14 @@ static int parse_config_file(const char *path) {
     f = fopen(path, "r");
     if (!f) {
         if (errno == ENOENT) {
-            LOG_INFO("Config file not found, using defaults: %s", path);
+            LEXEC_LOG_INFO("Config file not found, using defaults: %s", path);
             return 0;
         }
-        LOG_ERR("Cannot open config file: %s", path);
+        LEXEC_LOG_ERR("Cannot open config file: %s", path);
         return -1;
     }
 
-    LOG_INFO("Loading configuration from %s", path);
+    LEXEC_LOG_INFO("Loading configuration from %s", path);
 
     while (fgets(line, sizeof(line), f)) {
         /* Skip comments and empty lines */
@@ -291,7 +291,7 @@ int daemon_is_learning_mode(void) {
 static void perform_initial_scan(void) {
     int total = 0;
 
-    LOG_INFO("Performing initial system scan...");
+    LEXEC_LOG_INFO("Performing initial system scan...");
     printf("This will whitelist all existing executables.\n\n");
 
     for (int i = 0; SCAN_DIRS[i] != NULL; i++) {
@@ -305,7 +305,7 @@ static void perform_initial_scan(void) {
         total += count;
     }
 
-    LOG_INFO("Initial scan complete. Whitelisted %d executables.", total);
+    LEXEC_LOG_INFO("Initial scan complete. Whitelisted %d executables.", total);
     printf("Total whitelist entries: %lu\n", whitelist_count());
 }
 
@@ -426,20 +426,20 @@ int main(int argc, char *argv[]) {
 
     /* Initialize whitelist database */
     if (whitelist_init(g_config.db_path) == -1) {
-        LOG_ERR("Failed to initialize whitelist database");
+        LEXEC_LOG_ERR("Failed to initialize whitelist database");
         return EXIT_FAILURE;
     }
 
     /* Initialize in-memory cache */
     if (cache_init(0) == -1) {
-        LOG_ERR("Failed to initialize whitelist cache");
+        LEXEC_LOG_ERR("Failed to initialize whitelist cache");
         whitelist_close();
         return EXIT_FAILURE;
     }
 
     /* Initialize IPC server for GUI communication */
     if (ipc_server_init() == -1) {
-        LOG_ERR("Failed to initialize IPC server");
+        LEXEC_LOG_ERR("Failed to initialize IPC server");
         cache_shutdown();
         whitelist_close();
         return EXIT_FAILURE;
@@ -453,14 +453,14 @@ int main(int argc, char *argv[]) {
     /* Set learning mode if requested */
     if (g_config.learning_mode) {
         whitelist_set_learning_mode(1);
-        LOG_INFO("Learning mode ENABLED - new executables will be auto-whitelisted");
+        LEXEC_LOG_INFO("Learning mode ENABLED - new executables will be auto-whitelisted");
     }
 
     /* Initialize fanotify */
     g_fan_fd = fanotify_init_exec_monitor();
     if (g_fan_fd == -1) {
-        LOG_ERR("Failed to initialize fanotify");
-        LOG_ERR("Make sure kernel supports FAN_OPEN_EXEC_PERM (5.0+)");
+        LEXEC_LOG_ERR("Failed to initialize fanotify");
+        LEXEC_LOG_ERR("Make sure kernel supports FAN_OPEN_EXEC_PERM (5.0+)");
         ipc_server_shutdown();
         cache_shutdown();
         whitelist_close();
@@ -473,17 +473,17 @@ int main(int argc, char *argv[]) {
     /* Add mount points to monitor */
     for (int i = 0; MONITOR_MOUNTS[i] != NULL; i++) {
         if (fanotify_add_mount(g_fan_fd, MONITOR_MOUNTS[i]) == -1) {
-            LOG_WARN("Failed to monitor %s", MONITOR_MOUNTS[i]);
+            LEXEC_LOG_WARN("Failed to monitor %s", MONITOR_MOUNTS[i]);
         }
     }
 
     /* Daemonize if not in foreground mode */
     if (!g_config.foreground) {
-        LOG_INFO("Daemonizing...");
+        LEXEC_LOG_INFO("Daemonizing...");
         daemonize();
     }
 
-    LOG_INFO("Daemon started. Monitoring execution attempts.");
+    LEXEC_LOG_INFO("Daemon started. Monitoring execution attempts.");
     if (g_config.foreground) {
         printf("Press Ctrl+C to stop.\n\n");
     }
@@ -492,7 +492,7 @@ int main(int argc, char *argv[]) {
     fanotify_event_loop(g_fan_fd);
 
     /* Cleanup */
-    LOG_INFO("Shutting down...");
+    LEXEC_LOG_INFO("Shutting down...");
     close(g_fan_fd);
     ipc_server_shutdown();
     cache_shutdown();
@@ -502,6 +502,6 @@ int main(int argc, char *argv[]) {
         closelog();
     }
 
-    LOG_INFO("Daemon stopped.");
+    LEXEC_LOG_INFO("Daemon stopped.");
     return EXIT_SUCCESS;
 }

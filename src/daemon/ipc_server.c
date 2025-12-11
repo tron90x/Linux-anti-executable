@@ -5,7 +5,6 @@
  * Uses non-blocking I/O with poll() for responsiveness.
  */
 
-#define _GNU_SOURCE
 #include "ipc_server.h"
 #include "../common/protocol.h"
 

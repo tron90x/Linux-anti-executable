@@ -10,7 +10,6 @@
  * to avoid checking every file open on the system.
  */
 
-#define _GNU_SOURCE
 #include "fanotify_handler.h"
 #include "whitelist.h"
 #include "whitelist_cache.h"

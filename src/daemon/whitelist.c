@@ -4,7 +4,6 @@
  * Uses SQLite3 for persistent storage of whitelisted file hashes
  */
 
-#define _GNU_SOURCE
 #include "whitelist.h"
 #include "../common/hash.h"
 
