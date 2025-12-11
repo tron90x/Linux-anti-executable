@@ -201,9 +201,9 @@ static void show_permission_dialog(lexec_exec_request_t *request) {
         NULL
     );
 
-    /* Make it stay on top and grab focus */
-    gtk_window_set_keep_above(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_urgency_hint(GTK_WINDOW(dialog), TRUE);
+    /* Make it stay on top and grab focus - GTK4 compatible */
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_present(GTK_WINDOW(dialog));
 
     content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 
