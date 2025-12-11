@@ -82,8 +82,8 @@ int ipc_server_init(void) {
         return -1;
     }
 
-    /* Allow user group to connect */
-    chmod(LEXEC_SOCKET_PATH, 0660);
+    /* Allow any user to connect (GUI runs as regular user) */
+    chmod(LEXEC_SOCKET_PATH, 0666);
 
     /* Listen for connections */
     if (listen(g_server.server_fd, 5) == -1) {
