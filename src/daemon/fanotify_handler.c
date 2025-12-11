@@ -251,9 +251,10 @@ static int ask_user_permission(const char *path, const char *hash, pid_t pid, in
             return daemon_get_default_deny() ? -1 : 0;
 
         case LEXEC_RESPONSE_NO_CLIENT:
-            syslog(LOG_WARNING, "No GUI connected for: %s (default: %s)",
-                   path, daemon_get_default_deny() ? "DENY" : "ALLOW");
-            return daemon_get_default_deny() ? -1 : 0;
+            /* CRITICAL: Always allow when no GUI is connected to prevent system lockup */
+            syslog(LOG_WARNING, "No GUI connected - allowing: %s", path);
+            printf("  [NO GUI] Auto-allowing: %s\n", path);
+            return 0;  /* Allow but don't whitelist */
 
         default:
             return daemon_get_default_deny() ? -1 : 0;
